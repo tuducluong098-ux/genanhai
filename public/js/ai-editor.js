@@ -7,6 +7,7 @@
  * - Vietnamese-to-English intelligent enhancement
  * - Aspect ratios (1:1, 16:9, 9:16, 4:3, 3:2)
  * - 1-Click handover to Crop & Rotate Studio
+ * - Dual Engine: Runs via Express API or direct Client-Side on GitHub Pages!
  */
 
 class AiEditor {
@@ -153,6 +154,49 @@ class AiEditor {
     }
   }
 
+  enhancePromptLocally(rawPrompt, style = 'none') {
+    let p = (rawPrompt || '').trim();
+    const dict = [
+      { vn: /cô gái/gi, en: 'beautiful young girl' },
+      { vn: /chàng trai/gi, en: 'handsome man' },
+      { vn: /mèo con/gi, en: 'cute kitten' },
+      { vn: /chó con/gi, en: 'cute puppy' },
+      { vn: /phong cảnh/gi, en: 'landscape scenery' },
+      { vn: /hoàng hôn/gi, en: 'golden hour sunset' },
+      { vn: /bình minh/gi, en: 'sunrise dawn' },
+      { vn: /thành phố/gi, en: 'futuristic city skyline' },
+      { vn: /ban đêm/gi, en: 'at night with glowing lights' },
+      { vn: /cyberpunk/gi, en: 'cyberpunk neon aesthetic' },
+      { vn: /anime/gi, en: 'japanese anime style, Makoto Shinkai aesthetic' },
+      { vn: /sơn dầu/gi, en: 'oil painting on textured canvas' },
+      { vn: /chân thực|thực tế/gi, en: 'photorealistic 8k uhd, cinematic lighting' },
+      { vn: /hoạt hình 3d/gi, en: '3D Pixar Disney animated movie style' },
+      { vn: /chụp ảnh/gi, en: 'professional photo shot on 85mm lens, high quality' },
+      { vn: /tuyết rơi/gi, en: 'falling snow winter wonderland' },
+      { vn: /biển/gi, en: 'tropical ocean beach crystal blue water' }
+    ];
+
+    dict.forEach((item) => {
+      p = p.replace(item.vn, item.en);
+    });
+
+    const styleModifiers = {
+      'anime': ', japanese anime art, vibrant colors, Studio Ghibli inspired, detailed background',
+      'cyberpunk': ', cyberpunk style, neon violet and cyan lights, rain-slicked city streets, futuristic sci-fi aesthetic',
+      'cinematic': ', cinematic movie still, 35mm film photography, 8k resolution, dramatic volumetric lighting, ultra-detailed',
+      '3d-pixar': ', 3D Disney Pixar character animation style, smooth lighting, cute charming expressions, octane render 3D',
+      'oil-painting': ', masterpiece oil painting, rich textured brush strokes, classical fine art style',
+      'watercolor': ', soft watercolor painting, artistic splash, pastel tones, elegant paper texture',
+      'fantasy': ', epic fantasy concept art, mystical atmosphere, magical particles, detailed digital art',
+      'vintage': ', vintage 1980s retro film look, grain, warm sepia tones, nostalgic aesthetic'
+    };
+
+    if (style && styleModifiers[style]) {
+      p += styleModifiers[style];
+    }
+    return p;
+  }
+
   enhancePrompt() {
     const textarea = document.getElementById('aiPromptInput');
     if (!textarea) return;
@@ -217,45 +261,70 @@ class AiEditor {
     window.app.showToast('Đang kết nối AI và tạo hình ảnh chất lượng cao...', 'info');
 
     try {
-      let endpoint = '/api/ai/generate';
-      let payload = {
-        prompt,
-        style: this.selectedStyle,
-        width,
-        height,
-        model,
-        seed
-      };
+      let dataUrl = null;
 
-      if (this.mode === 'img2img' && this.sourceImageDataUrl) {
-        endpoint = '/api/ai/edit';
-        payload.image = this.sourceImageDataUrl;
+      // 1. First try calling Express backend if available
+      try {
+        let endpoint = '/api/ai/generate';
+        let payload = {
+          prompt,
+          style: this.selectedStyle,
+          width,
+          height,
+          model,
+          seed
+        };
+
+        if (this.mode === 'img2img' && this.sourceImageDataUrl) {
+          endpoint = '/api/ai/edit';
+          payload.image = this.sourceImageDataUrl;
+        }
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success) {
+            dataUrl = data.dataUrl;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend API unavailable, using direct client-side Pollinations AI:', backendErr.message);
       }
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      // 2. Direct client-side Pollinations AI fallback (works on GitHub Pages static!)
+      if (!dataUrl) {
+        const enhanced = this.enhancePromptLocally(prompt, this.selectedStyle);
+        const encoded = encodeURIComponent(enhanced);
+        const directUrl = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true`;
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Lỗi khi tạo ảnh với AI.');
+        const imgResp = await fetch(directUrl);
+        if (!imgResp.ok) throw new Error('Không thể tạo ảnh từ máy chủ AI.');
+        const blob = await imgResp.blob();
+        dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
       }
 
-      this.currentResultDataUrl = data.dataUrl;
+      this.currentResultDataUrl = dataUrl;
 
       // Update preview UI
       if (placeholder) placeholder.style.display = 'none';
       if (previewImg) {
-        previewImg.src = data.dataUrl;
+        previewImg.src = dataUrl;
         previewImg.style.display = 'block';
       }
       if (previewContainer) previewContainer.style.display = 'flex';
       if (actionToolbar) actionToolbar.style.display = 'flex';
 
       // Record to history strip
-      this.addToHistory(data.dataUrl, prompt);
+      this.addToHistory(dataUrl, prompt);
 
       window.app.showToast('Tạo ảnh AI thành công!', 'success');
     } catch (err) {

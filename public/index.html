@@ -4,9 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OmniPixel Studio | AI Prompt Image Editor, Crop & Rotate, Image Downloader</title>
-  <link rel="stylesheet" href="/css/cropper.css" />
-  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="css/cropper.css" />
+  <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
+  <!-- JSZip for standalone browser zip generation (GitHub Pages support) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 
@@ -681,12 +683,12 @@
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <!-- Scripts -->
-  <script src="/js/crop-editor.js"></script>
-  <script src="/js/ai-editor.js"></script>
-  <script src="/js/downloader.js"></script>
-  <script src="/js/api-tester.js"></script>
-  <script src="/js/app.js"></script>
+  <!-- Scripts (Relative paths for GitHub Pages & Localhost) -->
+  <script src="js/crop-editor.js"></script>
+  <script src="js/ai-editor.js"></script>
+  <script src="js/downloader.js"></script>
+  <script src="js/api-tester.js"></script>
+  <script src="js/app.js"></script>
 
 </body>
 </html>

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniPixel Studio | AI Prompt Image Editor, Crop & Rotate, Image Downloader</title>
+  <link rel="stylesheet" href="css/cropper.css" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
+  <!-- JSZip for standalone browser zip generation (GitHub Pages support) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-icon">✨</div>
+      <div class="brand-text">
+        <h1>OmniPixel Studio</h1>
+      </div>
+      <span class="brand-badge">AI & Creative</span>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="crop">
+        <span>✂️</span> Cắt & Xoay Ảnh
+      </button>
+      <button class="tab-btn" data-tab="ai">
+        <span>🎨</span> Chỉnh Ảnh Bằng AI Prompt
+      </button>
+      <button class="tab-btn" data-tab="downloader">
+        <span>📥</span> Tải Ảnh Web (Extension Style)
+      </button>
+      <button class="tab-btn" data-tab="api">
+        <span>⚡</span> API & Docs
+      </button>
+    </nav>
+
+    <div class="header-actions">
+      <div class="badge-status">
+        <span class="badge-status-dot"></span>
+        <span>Hệ thống sẵn sàng</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- =========================================================================
+       TAB 1: CROP & ROTATE STUDIO (PdfSimpli Style)
+       ========================================================================= -->
+  <main id="tab-crop" class="tab-content active">
+    <div class="crop-studio-container">
+      
+      <!-- Topbar Controls -->
+      <div class="crop-topbar">
+        <div class="topbar-group">
+          <input type="file" id="cropFileInput" accept="image/*" style="display: none;" />
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('cropFileInput').click()">
+            📁 Mở ảnh từ máy
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnLoadSampleImage">
+            🖼️ Ảnh mẫu
+          </button>
+          <div style="width: 1px; height: 20px; background: var(--border-color); margin: 0 4px;"></div>
+          <button class="btn btn-secondary btn-sm" id="btnUndo" title="Hoàn tác (Ctrl+Z)" disabled>
+            ↩️ Hoàn tác
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnRedo" title="Làm lại (Ctrl+Y)" disabled>
+            ↪️ Làm lại
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnResetOriginal" title="Khôi phục ảnh gốc">
+            🔄 Khôi phục gốc
+          </button>
+        </div>
+
+        <!-- Zoom & View controls -->
+        <div class="topbar-group">
+          <button class="btn btn-secondary btn-sm" id="btnZoomOut" title="Thu nhỏ (-)">➖</button>
+          <span id="zoomDisplayLabel" style="font-size: 0.775rem; font-family: var(--font-mono); min-width: 45px; text-align: center;">100%</span>
+          <button class="btn btn-secondary btn-sm" id="btnZoomIn" title="Phóng to (+)">➕</button>
+          <button class="btn btn-secondary btn-sm" id="btnZoomFit" title="Vừa màn hình">Vừa khung</button>
+          <button class="btn btn-secondary btn-sm" id="btnZoom100" title="100% Kích thước thực">100%</button>
+        </div>
+
+        <!-- Export controls & Handover -->
+        <div class="topbar-group">
+          <select id="exportFormatSelect" class="input-field" style="width: auto; padding: 0.35rem 0.5rem; font-size: 0.8rem;">
+            <option value="png">PNG (Không nén)</option>
+            <option value="jpeg">JPG (Ảnh chụp)</option>
+            <option value="webp">WEBP (Tối ưu web)</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="btnDownloadProcessed">
+            💾 Tải ảnh về
+          </button>
+          <button class="btn btn-accent btn-sm" id="btnSendToAi" title="Chuyển ảnh này sang tab AI Prompt">
+            🎨 Chuyển sang AI Prompt ➡️
+          </button>
+        </div>
+      </div>
+
+      <!-- Crop Floating Bar when cropping is active -->
+      <div id="cropActiveBar" style="display: none; background: rgba(30, 58, 138, 0.95); padding: 0.5rem 1.5rem; justify-content: space-between; align-items: center; border-bottom: 1px solid #3b82f6;">
+        <span style="font-size: 0.85rem; font-weight: 600; color: #fff;">
+          ✂️ Chế độ cắt đang bật: Kéo 8 góc để chỉnh vùng chọn hoặc chọn tỉ lệ bên phải.
+        </span>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" id="btnCancelCrop">Hủy cắt</button>
+          <button class="btn btn-primary btn-sm" id="btnApplyCrop">Áp dụng cắt</button>
+        </div>
+      </div>
+
+      <!-- Main Workspace -->
+      <div class="crop-workspace">
+        <!-- Canvas Viewport -->
+        <div class="crop-canvas-area" id="cropDropZone">
+          <div id="cropEmptyState" class="empty-placeholder">
+            <div class="empty-icon">🖼️</div>
+            <h3 style="margin-bottom: 0.5rem; color: #fff;">Kéo thả ảnh vào đây</h3>
+            <p style="font-size: 0.85rem; margin-bottom: 1rem;">Hỗ trợ định dạng PNG, JPG, WEBP, GIF</p>
+            <button class="btn btn-primary" onclick="document.getElementById('cropFileInput').click()">
+              Chọn ảnh từ máy tính
+            </button>
+          </div>
+
+          <div id="cropCanvasWrapper" class="crop-canvas-wrapper" style="display: none;">
+            <div id="cropContainer" class="crop-container">
+              <canvas id="mainCanvas"></canvas>
+
+              <!-- Interactive Crop Selection Overlay (8 Handles - pdfsimpli style) -->
+              <div id="cropOverlay" class="crop-backdrop" style="display: none;">
+                <div id="cropSelection" class="crop-selection">
+                  <div class="crop-size" id="cropSizeBadge">0 × 0 px</div>
+                  <!-- Rule of thirds lines -->
+                  <div class="crop-grid-line-h h-1"></div>
+                  <div class="crop-grid-line-h h-2"></div>
+                  <div class="crop-grid-line-v v-1"></div>
+                  <div class="crop-grid-line-v v-2"></div>
+                  <!-- 8 Handles -->
+                  <div class="crop-handle handle-nw" data-handle="nw"></div>
+                  <div class="crop-handle handle-n"  data-handle="n"></div>
+                  <div class="crop-handle handle-ne" data-handle="ne"></div>
+                  <div class="crop-handle handle-e"  data-handle="e"></div>
+                  <div class="crop-handle handle-se" data-handle="se"></div>
+                  <div class="crop-handle handle-s"  data-handle="s"></div>
+                  <div class="crop-handle handle-sw" data-handle="sw"></div>
+                  <div class="crop-handle handle-w"  data-handle="w"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar Tools (Transform, Light & Tone, Colors & Effects) -->
+        <aside class="crop-sidebar">
+          
+          <!-- Section 1: Transform (Biến đổi - pdfsimpli style) -->
+          <div class="sidebar-section">
+            <div class="sidebar-section-header">
+              <h3>📐 Biến đổi (Transform)</h3>
+            </div>
+
+            <!-- Crop button -->
+            <button class="btn btn-primary" id="btnStartCrop" style="width: 100%; margin-bottom: 0.75rem;">
+              ✂️ Bắt đầu cắt ảnh (Crop)
+            </button>
+
+            <!-- Aspect ratios -->
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Tỉ lệ khung hình:</div>
+            <div class="aspect-ratio-selector">
+              <span class="chip-ratio active" data-ratio="free">Tự do</span>
+              <span class="chip-ratio" data-ratio="1:1">1:1 (Vuông)</span>
+              <span class="chip-ratio" data-ratio="4:3">4:3</span>
+              <span class="chip-ratio" data-ratio="16:9">16:9</span>
+              <span class="chip-ratio" data-ratio="9:16">9:16 Story</span>
+              <span class="chip-ratio" data-ratio="3:2">3:2</span>
+              <span class="chip-ratio" data-ratio="2:3">2:3</span>
+            </div>
+
+            <!-- Rotate buttons -->
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 1rem; margin-bottom: 0.4rem;">Xoay & Lật ảnh:</div>
+            <div class="tool-grid-3">
+              <button class="btn-tool" id="btnRotate90CW" title="Xoay phải 90 độ">
+                <span>🔄</span>
+                <span>Xoay 90°</span>
+              </button>
+              <button class="btn-tool" id="btnRotate90CCW" title="Xoay trái 90 độ">
+                <span>↩️</span>
+                <span>Xoay -90°</span>
+              </button>
+              <button class="btn-tool" id="btnRotate180" title="Xoay 180 độ">
+                <span>🔃</span>
+                <span>Xoay 180°</span>
+              </button>
+            </div>
+
+            <!-- Free rotation slider -->
+            <div class="slider-control">
+              <div class="slider-label">
+                <span>Góc xoay tự do</span>
+                <span class="slider-value" id="rotateValue">0°</span>
+              </div>
+              <input type="range" id="rotateSlider" class="range-slider" min="-180" max="180" step="1" value="0" />
+              <button class="btn btn-secondary btn-sm" id="btnResetRotate" style="width: 100%; margin-top: 0.4rem;">
+                Đặt lại 0°
+              </button>
+            </div>
+
+            <!-- Flip buttons -->
+            <div class="tool-grid-2" style="margin-top: 0.75rem;">
+              <button class="btn-tool" id="btnFlipH" title="Lật ngang">
+                <span>↔️</span>
+                <span>Lật ngang</span>
+              </button>
+              <button class="btn-tool" id="btnFlipV" title="Lật dọc">
+                <span>↕️</span>
+                <span>Lật dọc</span>
+              </button>
+            </div>
+
+            <!-- Resize width/height -->
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 1rem; margin-bottom: 0.4rem;">Đổi kích thước ảnh (Resize):</div>
+            <div class="tool-grid-2">
+              <div>
+                <label style="font-size: 0.7rem; color: var(--text-muted);">Rộng (px)</label>
+                <input type="number" id="resizeWidthInput" class="input-field" placeholder="W" />
+              </div>
+              <div>
+                <label style="font-size: 0.7rem; color: var(--text-muted);">Cao (px)</label>
+                <input type="number" id="resizeHeightInput" class="input-field" placeholder="H" />
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btnApplyResize" style="width: 100%; margin-top: 0.5rem;">
+              Áp dụng kích thước mới
+            </button>
+          </div>
+
+          <!-- Section 2: Light & Tone (Luz y tono - pdfsimpli style) -->
+          <div class="sidebar-section">
+            <div class="sidebar-section-header">
+              <h3>☀️ Ánh sáng & Tông màu (Light & Tone)</h3>
+            </div>
+
+            <!-- Brightness -->
+            <div class="slider-control">
+              <div class="slider-label">
+                <span>Độ sáng (Brightness)</span>
+                <span class="slider-value" id="valBrightness">0%</span>
+              </div>
+              <input type="range" id="sliderBrightness" class="range-slider" min="-100" max="100" step="1" value="0" />
+            </div>
+
+            <!-- Contrast -->
+            <div class="slider-control">
+              <div class="slider-label">
+                <span>Độ tương phản (Contrast)</span>
+                <span class="slider-value" id="valContrast">0%</span>
+              </div>
+              <input type="range" id="sliderContrast" class="range-slider" min="-100" max="100" step="1" value="0" />
+            </div>
+
+            <!-- Blur -->
+            <div class="slider-control">
+              <div class="slider-label">
+                <span>Độ mờ (Blur)</span>
+                <span class="slider-value" id="valBlur">0px</span>
+              </div>
+              <input type="range" id="sliderBlur" class="range-slider" min="0" max="20" step="1" value="0" />
+            </div>
+
+            <!-- Opacity -->
+            <div class="slider-control">
+              <div class="slider-label">
+                <span>Độ trong suốt (Opacity)</span>
+                <span class="slider-value" id="valOpacity">100%</span>
+              </div>
+              <input type="range" id="sliderOpacity" class="range-slider" min="10" max="100" step="1" value="100" />
+            </div>
+          </div>
+
+          <!-- Section 3: Colors & Effects (Colores y efectos - pdfsimpli style) -->
+          <div class="sidebar-section">
+            <div class="sidebar-section-header">
+              <h3>🎨 Màu sắc & Hiệu ứng (Effects)</h3>
+            </div>
+
+            <div class="tool-grid-3">
+              <button class="btn-tool" id="btnFilterGrayscale">
+                <span>🌑</span>
+                <span>Đen trắng</span>
+              </button>
+              <button class="btn-tool" id="btnFilterSepia">
+                <span>📜</span>
+                <span>Sepia</span>
+              </button>
+              <button class="btn-tool" id="btnFilterInvert">
+                <span>🌓</span>
+                <span>Đảo màu</span>
+              </button>
+            </div>
+
+            <!-- Pixelate -->
+            <div class="slider-control" style="margin-top: 0.75rem;">
+              <div class="slider-label">
+                <span>Pixelate (Điểm ảnh)</span>
+                <span class="slider-value" id="valPixelate">1</span>
+              </div>
+              <input type="range" id="sliderPixelate" class="range-slider" min="1" max="20" step="1" value="1" />
+            </div>
+
+            <!-- Threshold -->
+            <div class="slider-control">
+              <div class="slider-label">
+                <span>Threshold (Ngưỡng nhị phân)</span>
+                <span class="slider-value" id="valThreshold">0</span>
+              </div>
+              <input type="range" id="sliderThreshold" class="range-slider" min="0" max="255" step="5" value="0" />
+            </div>
+
+            <button class="btn btn-secondary btn-sm" id="btnResetFilters" style="width: 100%; margin-top: 1rem;">
+              Đặt lại tất cả bộ lọc
+            </button>
+          </div>
+
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <!-- =========================================================================
+       TAB 2: AI PROMPT IMAGE EDITOR & GENERATOR
+       ========================================================================= -->
+  <main id="tab-ai" class="tab-content">
+    <div class="ai-studio-container">
+      
+      <div class="ai-grid">
+        <!-- Controls Column -->
+        <div class="ai-controls-card">
+          
+          <!-- Mode Switcher -->
+          <div>
+            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">
+              CHẾ ĐỘ TẠO & CHỈNH SỬA
+            </label>
+            <div class="ai-mode-toggle">
+              <button class="ai-mode-btn active" data-mode="text2img">
+                ✨ Tạo ảnh mới từ Prompt
+              </button>
+              <button class="ai-mode-btn" data-mode="img2img">
+                🖼️ Chỉnh ảnh có sẵn với Prompt
+              </button>
+            </div>
+          </div>
+
+          <!-- Source Image (when img2img active) -->
+          <div id="aiSourceImageCard" style="display: none; background: var(--bg-elevated); padding: 0.75rem; border-radius: var(--radius-md); border: 1px dashed var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; font-weight: 600;">Ảnh nguồn cần chỉnh sửa:</span>
+              <input type="file" id="aiSourceFileInput" accept="image/*" style="display: none;" />
+              <button class="btn btn-secondary btn-sm" onclick="document.getElementById('aiSourceFileInput').click()">
+                Đổi ảnh
+              </button>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: center; min-height: 100px; background: #000; border-radius: var(--radius-sm); overflow: hidden;">
+              <img id="aiSourceThumb" style="max-height: 120px; max-width: 100%; display: none; object-fit: contain;" />
+              <span id="aiSourceEmpty" style="font-size: 0.8rem; color: var(--text-muted);">Chưa có ảnh nguồn. Hãy bấm "Đổi ảnh" hoặc chuyển từ tab Cắt/Tải ảnh sang.</span>
+            </div>
+          </div>
+
+          <!-- Prompt Box -->
+          <div class="prompt-box">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">
+                PROMPT MÔ TẢ HÌNH ẢNH (Hỗ trợ tiếng Việt & tiếng Anh)
+              </label>
+              <button class="btn btn-secondary btn-sm" id="btnEnhancePrompt" title="Tự động thêm chi tiết nghệ thuật & chất lượng cao vào prompt">
+                ✨ Cải thiện Prompt
+              </button>
+            </div>
+            <textarea id="aiPromptInput" class="prompt-textarea" placeholder="Ví dụ: Một chú mèo phi hành gia trôi nổi trong không gian vũ trụ lấp lánh sao, phong cách 3D hoạt hình Pixar..."></textarea>
+          </div>
+
+          <!-- Sample Prompts -->
+          <div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem;">Gợi ý prompt nhanh:</div>
+            <div class="sample-urls" id="aiSamplePrompts"></div>
+          </div>
+
+          <!-- Style Preset Tags -->
+          <div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.4rem; font-weight: 600;">
+              PHONG CÁCH NGHỆ THUẬT (STYLE PRESETS)
+            </div>
+            <div class="style-tags-container">
+              <span class="style-tag" data-style="anime">🎌 Anime Nhật Bản</span>
+              <span class="style-tag" data-style="cyberpunk">🏙️ Cyberpunk Neon</span>
+              <span class="style-tag" data-style="cinematic">📸 Ảnh Chân Thực 8K</span>
+              <span class="style-tag" data-style="3d-pixar">🧸 Hoạt hình 3D Pixar</span>
+              <span class="style-tag" data-style="oil-painting">🎨 Tranh Sơn Dầu</span>
+              <span class="style-tag" data-style="watercolor">🖌️ Màu Nước</span>
+              <span class="style-tag" data-style="fantasy">🏰 Fantasy Huyền Bí</span>
+              <span class="style-tag" data-style="vintage">📻 Retro Vintage 80s</span>
+            </div>
+          </div>
+
+          <!-- Aspect Ratio & Advanced -->
+          <div class="tool-grid-2">
+            <div>
+              <label style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; display: block; margin-bottom: 0.3rem;">
+                Tỉ lệ khung hình
+              </label>
+              <div class="aspect-ratio-selector">
+                <span class="chip-ratio ai-ratio-btn active" data-ratio="1:1">1:1</span>
+                <span class="chip-ratio ai-ratio-btn" data-ratio="16:9">16:9</span>
+                <span class="chip-ratio ai-ratio-btn" data-ratio="9:16">9:16</span>
+                <span class="chip-ratio ai-ratio-btn" data-ratio="4:3">4:3</span>
+              </div>
+            </div>
+
+            <div>
+              <label style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; display: block; margin-bottom: 0.3rem;">
+                AI Engine Model
+              </label>
+              <select id="aiModelSelect" class="input-field">
+                <option value="flux">Flux (Chất lượng cao nhất)</option>
+                <option value="turbo">Turbo (Siêu tốc 1 giây)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Seed -->
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="number" id="aiSeedInput" class="input-field" placeholder="Seed (ngẫu nhiên nếu để trống)" />
+            <button class="btn btn-secondary btn-sm" id="btnRandomSeed" title="Seed ngẫu nhiên">🎲</button>
+          </div>
+
+          <!-- Generate Action Button -->
+          <button class="btn btn-accent" id="btnGenerateAi" style="width: 100%; padding: 0.85rem; font-size: 1rem; font-weight: 600;">
+            <span class="spinner" id="aiSpinner" style="display: none;"></span>
+            <span id="aiGenerateBtnText">Tạo ảnh mới với AI</span>
+          </button>
+
+        </div>
+
+        <!-- Preview Column -->
+        <div class="ai-preview-card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; font-weight: 700; color: #fff;">🖼️ Kết quả hình ảnh AI</h3>
+            <div id="aiActionToolbar" style="display: none; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" id="btnAiSendToCrop">
+                ✂️ Mở trong Cắt & Xoay
+              </button>
+              <button class="btn btn-primary btn-sm" id="btnAiDownload">
+                ⬇️ Tải ảnh về
+              </button>
+            </div>
+          </div>
+
+          <div class="ai-preview-viewport">
+            <div id="aiEmptyPreview" class="empty-placeholder" style="border: none;">
+              <div class="empty-icon">🎨</div>
+              <p style="font-size: 0.9rem;">Nhập prompt bên trái và bấm <strong>"Tạo ảnh mới với AI"</strong> để xem kết quả tại đây.</p>
+            </div>
+
+            <div id="aiPreviewContainer" style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;">
+              <img id="aiMainPreviewImg" class="ai-preview-img" alt="AI Generated Image" />
+            </div>
+          </div>
+
+          <!-- History Strip -->
+          <div style="margin-top: 1rem;">
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Lịch sử tạo ảnh phiên này:</div>
+            <div class="ai-history-strip" id="aiHistoryStrip">
+              <span style="font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem;">Chưa có ảnh trong lịch sử.</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- =========================================================================
+       TAB 3: WEB IMAGE DOWNLOADER (Chrome Extension Style)
+       ========================================================================= -->
+  <main id="tab-downloader" class="tab-content">
+    <div class="downloader-container">
+      
+      <!-- Target URL Input -->
+      <div class="downloader-search-card">
+        <div class="url-input-group">
+          <input type="url" id="downloaderUrlInput" class="url-input" placeholder="Dán đường link trang web bất kỳ cần quét ảnh (ví dụ: https://en.wikipedia.org/wiki/Cat, https://unsplash.com...)" />
+          <button class="btn btn-primary" id="btnStartScrape" style="padding: 0 1.5rem; font-weight: 600;">
+            <span class="spinner" id="downloaderSpinner" style="display: none;"></span>
+            <span id="downloaderBtnText">Quét ảnh ngay</span>
+          </button>
+        </div>
+
+        <div class="sample-urls">
+          <span>Ví dụ nhanh:</span>
+          <div id="downloaderSampleChips" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+        </div>
+      </div>
+
+      <!-- Extension-style Filter Bar -->
+      <div class="filter-bar-card" id="downloaderFilterCard" style="display: none;">
+        <div class="filter-controls-row">
+          
+          <!-- Min Width Slider -->
+          <div class="filter-item">
+            <label>Rộng tối thiểu:</label>
+            <input type="range" id="sliderMinWidth" class="range-slider" min="0" max="2000" step="50" value="0" style="width: 100px;" />
+            <span id="valMinWidth" class="slider-value" style="font-size: 0.75rem; min-width: 45px;">0px</span>
+            <input type="number" id="inputMinWidth" class="input-field" style="width: 60px; padding: 2px 4px; font-size: 0.75rem;" value="0" />
+          </div>
+
+          <!-- Min Height Slider -->
+          <div class="filter-item">
+            <label>Cao tối thiểu:</label>
+            <input type="range" id="sliderMinHeight" class="range-slider" min="0" max="2000" step="50" value="0" style="width: 100px;" />
+            <span id="valMinHeight" class="slider-value" style="font-size: 0.75rem; min-width: 45px;">0px</span>
+            <input type="number" id="inputMinHeight" class="input-field" style="width: 60px; padding: 2px 4px; font-size: 0.75rem;" value="0" />
+          </div>
+
+          <!-- Format Filters -->
+          <div class="filter-item">
+            <label>Định dạng:</label>
+            <div class="format-tags">
+              <span class="format-tag active" data-format="ALL">Tất cả</span>
+              <span class="format-tag" data-format="JPG">JPG</span>
+              <span class="format-tag" data-format="PNG">PNG</span>
+              <span class="format-tag" data-format="WEBP">WEBP</span>
+              <span class="format-tag" data-format="SVG">SVG</span>
+              <span class="format-tag" data-format="GIF">GIF</span>
+            </div>
+          </div>
+
+          <!-- Search URL text -->
+          <div class="filter-item">
+            <input type="text" id="downloaderSearchFilter" class="input-field" placeholder="🔍 Lọc theo link/tên..." style="width: 150px; padding: 4px 8px; font-size: 0.785rem;" />
+          </div>
+
+          <!-- Orientation -->
+          <div class="filter-item" style="gap: 10px;">
+            <label><input type="radio" name="orientationFilter" value="all" checked /> Tất cả</label>
+            <label><input type="radio" name="orientationFilter" value="landscape" /> Ngang</label>
+            <label><input type="radio" name="orientationFilter" value="portrait" /> Dọc</label>
+            <label><input type="radio" name="orientationFilter" value="square" /> Vuông</label>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Actions Bar (Select All / Batch Download) -->
+      <div class="actions-bar" id="downloaderActionsBar" style="display: none;">
+        <div class="selection-info">
+          <button class="btn btn-secondary btn-sm" id="btnSelectAll">Chọn tất cả</button>
+          <button class="btn btn-secondary btn-sm" id="btnDeselectAll">Bỏ chọn</button>
+          <button class="btn btn-secondary btn-sm" id="btnInvertSelection">Đảo chọn</button>
+          <div style="margin-left: 0.5rem;">
+            Đã chọn: <span id="downloaderSelectedCounter" class="image-counter">0</span> / <span id="downloaderTotalCounter">0</span> ảnh
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" id="btnDownloadIndividual" disabled>
+            ⬇️ Tải từng ảnh
+          </button>
+          <button class="btn btn-primary btn-sm" id="btnDownloadZip" disabled>
+            📦 Tải xuống các ảnh đã chọn (.ZIP)
+          </button>
+        </div>
+      </div>
+
+      <!-- Gallery Grid -->
+      <div id="downloaderEmptyState" class="empty-placeholder" style="margin-top: 2rem;">
+        <div class="empty-icon">🌐</div>
+        <h3 style="color: #fff; margin-bottom: 0.5rem;">Chưa có hình ảnh nào được quét</h3>
+        <p style="font-size: 0.85rem;">Nhập URL trang web bên trên để trích xuất toàn bộ ảnh, lọc theo kích thước và tải về dạng file nén ZIP tiện lợi.</p>
+      </div>
+
+      <div class="image-gallery-grid" id="downloaderGalleryGrid" style="display: none;"></div>
+
+    </div>
+  </main>
+
+  <!-- =========================================================================
+       TAB 4: API & HƯỚNG DẪN (Interactive Tester)
+       ========================================================================= -->
+  <main id="tab-api" class="tab-content">
+    <div class="api-container">
+      
+      <div style="margin-bottom: 1rem;">
+        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff;">🔌 Hệ Thống REST API Tích Hợp</h2>
+        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem;">
+          Toàn bộ chức năng cắt xoay (PdfSimpli), tải ảnh web (Extension Downloader) và tạo ảnh AI đều có API REST độc lập, có thể gọi từ code Python, Node.js hoặc cURL.
+        </p>
+      </div>
+
+      <!-- Endpoint 1: Crop & Rotate API -->
+      <div class="api-endpoint-card">
+        <div class="endpoint-header">
+          <span class="method-tag method-post">POST</span>
+          <span class="endpoint-path">/api/transform/rotate</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+          Xoay hình ảnh theo góc chỉ định (degrees: 90, 180, 270 hoặc góc tự do). Hỗ trợ nhận ảnh dạng file upload hoặc base64 dataUrl.
+        </p>
+
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 0.75rem;">
+          <input type="number" id="apiTestRotateDeg" class="input-field" value="90" style="width: 100px;" placeholder="Góc xoay" />
+          <button class="btn btn-primary btn-sm" id="btnTestRotateApi">Chạy thử API xoay</button>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <pre class="code-block" id="apiTestRotateOutput" style="flex: 1; max-height: 180px;">// Bấm "Chạy thử API xoay" để xem phản hồi JSON</pre>
+          <img id="apiTestRotatePreview" style="display: none; max-width: 120px; border-radius: 6px; border: 1px solid var(--border-color);" />
+        </div>
+      </div>
+
+      <!-- Endpoint 2: Scrape Images API -->
+      <div class="api-endpoint-card">
+        <div class="endpoint-header">
+          <span class="method-tag method-post">POST</span>
+          <span class="endpoint-path">/api/scrape-images</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+          Quét trang web, trích xuất tất cả thẻ img, picture, srcset, css background và openGraph ảnh kèm định dạng và URL tuyệt đối.
+        </p>
+
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 0.75rem;">
+          <input type="text" id="apiTestScrapeUrl" class="input-field" value="https://en.wikipedia.org/wiki/Cat" style="flex: 1;" />
+          <button class="btn btn-primary btn-sm" id="btnTestScrape">Chạy thử Quét ảnh</button>
+        </div>
+
+        <pre class="code-block" id="apiTestScrapeOutput" style="max-height: 200px;">// Bấm "Chạy thử Quét ảnh" để xem danh sách ảnh tìm được</pre>
+      </div>
+
+      <!-- Endpoint 3: AI Generate API -->
+      <div class="api-endpoint-card">
+        <div class="endpoint-header">
+          <span class="method-tag method-post">POST</span>
+          <span class="endpoint-path">/api/ai/generate</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+          Tạo ảnh nghệ thuật chất lượng cao từ Prompt văn bản (hỗ trợ tiếng Việt, phong cách anime, cyberpunk, 3d, v.v.).
+        </p>
+
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 0.75rem;">
+          <input type="text" id="apiTestAiPrompt" class="input-field" value="cute kitten wearing cyberpunk glasses" style="flex: 1;" />
+          <button class="btn btn-primary btn-sm" id="btnTestAiGen">Chạy thử Tạo ảnh AI</button>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <pre class="code-block" id="apiTestAiOutput" style="flex: 1; max-height: 180px;">// Bấm "Chạy thử Tạo ảnh AI" để tạo ảnh trực tiếp qua API</pre>
+          <img id="apiTestAiPreview" style="display: none; max-width: 120px; border-radius: 6px; border: 1px solid var(--border-color);" />
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Image Preview Fullscreen Modal -->
+  <div class="modal-backdrop" id="previewModalBackdrop">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3 id="modalPreviewTitle" style="font-size: 1rem; font-weight: 600; color: #fff;">Xem chi tiết ảnh</h3>
+          <span id="modalPreviewDimensions" style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);"></span>
+        </div>
+        <button class="modal-close-btn" id="previewModalClose">✕</button>
+      </div>
+      <div style="padding: 1.5rem; display: flex; align-items: center; justify-content: center; background: #000;">
+        <img id="modalPreviewImage" style="max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 6px;" />
+      </div>
+      <div style="padding: 0.75rem 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 8px;">
+        <a id="modalPreviewLink" target="_blank" class="btn btn-secondary btn-sm">Mở link gốc</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts (Relative paths for GitHub Pages & Localhost) -->
+  <script src="js/crop-editor.js"></script>
+  <script src="js/ai-editor.js"></script>
+  <script src="js/downloader.js"></script>
+  <script src="js/api-tester.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>

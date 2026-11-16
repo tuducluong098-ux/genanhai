@@ -6,6 +6,7 @@
  * - Select All, Deselect All, Invert Selection
  * - Bulk download as ZIP or individual files
  * - 1-Click transfer to Crop Studio or AI Studio
+ * - Dual Engine: Runs via Express Scraper or Client-Side DOMParser + JSZip (for GitHub Pages)!
  */
 
 class ImageDownloader {
@@ -139,6 +140,16 @@ class ImageDownloader {
     });
   }
 
+  getSafeImageSrc(item) {
+    if (item.isBase64) return item.url;
+    // If backend is running, use /api/proxy-image
+    if (!window.location.hostname.endsWith('github.io')) {
+      return `/api/proxy-image?url=${encodeURIComponent(item.url)}`;
+    }
+    // On GitHub Pages static, use direct or public CORS proxy
+    return item.url;
+  }
+
   async startScrape() {
     const urlInput = document.getElementById('downloaderUrlInput');
     const targetUrl = urlInput ? urlInput.value.trim() : '';
@@ -163,18 +174,68 @@ class ImageDownloader {
     window.app.showToast(`Đang quét ảnh từ: ${targetUrl}`, 'info');
 
     try {
-      const res = await fetch('/api/scrape-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl })
-      });
+      let scrapedList = [];
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Không thể quét ảnh từ trang web này.');
+      // 1. Try Express backend API
+      try {
+        const res = await fetch('/api/scrape-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: targetUrl })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && Array.isArray(data.images)) {
+            scrapedList = data.images;
+          }
+        }
+      } catch (e) {
+        console.warn('Backend scraper unavailable, using client-side DOMParser:', e.message);
       }
 
-      this.images = data.images || [];
+      // 2. Client-side fallback (CORS proxy + DOMParser for GitHub Pages static)
+      if (scrapedList.length === 0) {
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        const res = await fetch(proxyUrl);
+        const data = await res.json();
+        if (data && data.contents) {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(data.contents, 'text/html');
+          const foundSet = new Set();
+
+          const addSrc = (s, alt = '') => {
+            if (!s) return;
+            try {
+              const full = new URL(s.trim(), targetUrl).href;
+              if (!foundSet.has(full)) {
+                foundSet.add(full);
+                let format = 'JPG';
+                const c = full.split('?')[0].toLowerCase();
+                if (c.endsWith('.png')) format = 'PNG';
+                else if (c.endsWith('.webp')) format = 'WEBP';
+                else if (c.endsWith('.svg')) format = 'SVG';
+                else if (c.endsWith('.gif')) format = 'GIF';
+                scrapedList.push({ url: full, alt, format, isBase64: false });
+              }
+            } catch (err) {}
+          };
+
+          doc.querySelectorAll('img').forEach((el) => {
+            addSrc(el.getAttribute('src'), el.getAttribute('alt') || '');
+            addSrc(el.getAttribute('data-src'), el.getAttribute('alt') || '');
+            const srcset = el.getAttribute('srcset');
+            if (srcset) {
+              srcset.split(',').forEach((p) => addSrc(p.trim().split(' ')[0]));
+            }
+          });
+
+          doc.querySelectorAll('meta[property="og:image"]').forEach((el) => {
+            addSrc(el.getAttribute('content'), 'OG Image');
+          });
+        }
+      }
+
+      this.images = scrapedList;
       this.selectedUrls.clear();
 
       if (this.images.length === 0) {
@@ -187,9 +248,7 @@ class ImageDownloader {
       if (actionsBar) actionsBar.style.display = 'flex';
       if (grid) grid.style.display = 'grid';
 
-      // Load natural dimensions for images in parallel in background
       this.resolveDimensions();
-
       this.applyFilters();
       window.app.showToast(`Quét thành công! Tìm thấy ${this.images.length} hình ảnh.`, 'success');
     } catch (err) {
@@ -208,7 +267,7 @@ class ImageDownloader {
       if (item.width && item.height) return;
 
       const img = new Image();
-      const proxyUrl = item.isBase64 ? item.url : `/api/proxy-image?url=${encodeURIComponent(item.url)}`;
+      const proxyUrl = this.getSafeImageSrc(item);
       img.onload = () => {
         item.width = img.naturalWidth;
         item.height = img.naturalHeight;
@@ -222,21 +281,17 @@ class ImageDownloader {
     const { minWidth, minHeight, format, searchQuery, orientation } = this.filters;
 
     this.filteredImages = this.images.filter((img) => {
-      // Dimension filter (if dimension known)
       if (img.width && img.width < minWidth) return false;
       if (img.height && img.height < minHeight) return false;
 
-      // Format filter
       if (format !== 'ALL' && img.format !== format) return false;
 
-      // Search query
       if (searchQuery) {
         const u = (img.url || '').toLowerCase();
         const a = (img.alt || '').toLowerCase();
         if (!u.includes(searchQuery) && !a.includes(searchQuery)) return false;
       }
 
-      // Orientation
       if (orientation !== 'all' && img.width && img.height) {
         if (orientation === 'landscape' && img.width <= img.height) return false;
         if (orientation === 'portrait' && img.height <= img.width) return false;
@@ -270,7 +325,7 @@ class ImageDownloader {
       card.className = `image-card ${this.selectedUrls.has(item.url) ? 'selected' : ''}`;
       card.setAttribute('data-url', item.url);
 
-      const proxySrc = item.isBase64 ? item.url : `/api/proxy-image?url=${encodeURIComponent(item.url)}`;
+      const proxySrc = this.getSafeImageSrc(item);
       const dimText = item.width && item.height ? `${item.width} × ${item.height}` : 'Loading...';
 
       card.innerHTML = `
@@ -304,14 +359,14 @@ class ImageDownloader {
         </div>
       `;
 
-      // Click card checkbox or wrap to toggle selection
+      // Checkbox
       const checkbox = card.querySelector('.card-select-checkbox');
       checkbox.addEventListener('change', (e) => {
         e.stopPropagation();
         this.toggleSelect(item.url, checkbox.checked, card);
       });
 
-      // Click image to zoom / preview modal
+      // Preview modal
       card.querySelector('.card-image-wrap').addEventListener('click', () => {
         this.openPreviewModal(item);
       });
@@ -409,14 +464,14 @@ class ImageDownloader {
   // Download single image
   downloadSingleImage(item) {
     const link = document.createElement('a');
-    const proxyUrl = item.isBase64 ? item.url : `/api/proxy-image?url=${encodeURIComponent(item.url)}`;
+    const proxyUrl = this.getSafeImageSrc(item);
     link.href = proxyUrl;
     link.download = `image_${Date.now()}.${(item.format || 'jpg').toLowerCase()}`;
     link.click();
     window.app.showToast('Đang tải ảnh về máy...', 'success');
   }
 
-  // Batch download ZIP via server endpoint
+  // Batch download ZIP (Backend archiver with client-side JSZip fallback)
   async downloadSelectedZip() {
     if (this.selectedUrls.size === 0) return;
 
@@ -431,21 +486,51 @@ class ImageDownloader {
 
     try {
       const urlsArray = Array.from(this.selectedUrls);
-      const res = await fetch('/api/download-zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: urlsArray, zipName: `images_pack_${Date.now()}.zip` })
-      });
+      let zipDownloaded = false;
 
-      if (!res.ok) throw new Error('Không thể tạo file nén ZIP.');
+      // 1. Try Express backend ZIP API
+      try {
+        const res = await fetch('/api/download-zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls: urlsArray, zipName: `images_pack_${Date.now()}.zip` })
+        });
 
-      const blob = await res.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `images_pack_${Date.now()}.zip`;
-      link.click();
-      window.URL.revokeObjectURL(downloadUrl);
+        if (res.ok) {
+          const blob = await res.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = `images_pack_${Date.now()}.zip`;
+          link.click();
+          window.URL.revokeObjectURL(downloadUrl);
+          zipDownloaded = true;
+        }
+      } catch (backendErr) {
+        console.warn('Backend zip unavailable, using client-side JSZip:', backendErr.message);
+      }
+
+      // 2. Client-side JSZip fallback (works in standalone browser on GitHub Pages!)
+      if (!zipDownloaded && window.JSZip) {
+        const zip = new window.JSZip();
+        for (let i = 0; i < urlsArray.length; i++) {
+          const u = urlsArray[i];
+          try {
+            const resp = await fetch(u);
+            const b = await resp.blob();
+            const ext = b.type.includes('png') ? 'png' : b.type.includes('webp') ? 'webp' : 'jpg';
+            zip.file(`image_${String(i + 1).padStart(3, '0')}.${ext}`, b);
+          } catch (e) {}
+        }
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const downloadUrl = window.URL.createObjectURL(zipBlob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `images_pack_${Date.now()}.zip`;
+        link.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        zipDownloaded = true;
+      }
 
       window.app.showToast('Tải file ZIP thành công!', 'success');
     } catch (err) {
@@ -459,7 +544,6 @@ class ImageDownloader {
     }
   }
 
-  // Sequential individual downloads
   downloadSelectedIndividual() {
     if (this.selectedUrls.size === 0) return;
     const urls = Array.from(this.selectedUrls);
@@ -469,11 +553,10 @@ class ImageDownloader {
       setTimeout(() => {
         const item = this.images.find((x) => x.url === u) || { url: u, format: 'jpg' };
         this.downloadSingleImage(item);
-      }, i * 350); // slight delay to prevent browser block
+      }, i * 350);
     });
   }
 
-  // Preview Modal
   openPreviewModal(item) {
     const modal = document.getElementById('previewModalBackdrop');
     const img = document.getElementById('modalPreviewImage');
@@ -483,7 +566,7 @@ class ImageDownloader {
 
     if (!modal) return;
 
-    const proxySrc = item.isBase64 ? item.url : `/api/proxy-image?url=${encodeURIComponent(item.url)}`;
+    const proxySrc = this.getSafeImageSrc(item);
     if (img) img.src = proxySrc;
     if (title) title.textContent = item.alt || 'Xem chi tiết hình ảnh';
     if (dim) dim.textContent = item.width && item.height ? `${item.width} × ${item.height} px (${item.format})` : item.format;
