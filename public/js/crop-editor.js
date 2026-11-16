@@ -146,6 +146,19 @@ class CropEditor {
     // Resize controls
     document.getElementById('btnApplyResize')?.addEventListener('click', () => this.applyResize());
 
+    // Preset resolution chips (1000x1500, etc.)
+    document.querySelectorAll('.chip-res').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const w = parseInt(chip.getAttribute('data-w'), 10);
+        const h = parseInt(chip.getAttribute('data-h'), 10);
+        const wInput = document.getElementById('resizeWidthInput');
+        const hInput = document.getElementById('resizeHeightInput');
+        if (wInput) wInput.value = w;
+        if (hInput) hInput.value = h;
+        this.applyResize();
+      });
+    });
+
     // Light & Tone Sliders
     this.bindFilterSlider('sliderBrightness', 'valBrightness', (v) => { this.filters.brightness = v; }, '%');
     this.bindFilterSlider('sliderContrast', 'valContrast', (v) => { this.filters.contrast = v; }, '%');

@@ -3,11 +3,9 @@
  * Supports:
  * - Text-to-Image (Tạo ảnh từ Prompt)
  * - Image-to-Image (Chỉnh sửa ảnh gốc bằng Prompt)
- * - Preset visual style tags
- * - Vietnamese-to-English intelligent enhancement
- * - Aspect ratios (1:1, 16:9, 9:16, 4:3, 3:2)
- * - 1-Click handover to Crop & Rotate Studio
- * - Dual Engine: Runs via Express API or direct Client-Side on GitHub Pages!
+ * - 4 Variations Generator (A1, A2, A3, A4)
+ * - Iterative Loop: Select A2 -> continue editing (Crop, Rotate, Resize 1000x1500) -> loop again!
+ * - Vercel / GitHub Pages / Localhost resilient: never crashes on 404 HTML responses!
  */
 
 class AiEditor {
@@ -18,6 +16,7 @@ class AiEditor {
     this.selectedStyle = 'none';
     this.selectedRatio = '1:1';
     this.history = [];
+    this.variants = []; // Array of 4 variants: [{ id: 'A1', url: '...' }, { id: 'A2' }, ...]
 
     this.init();
   }
@@ -78,25 +77,22 @@ class AiEditor {
     // Enhance prompt button
     document.getElementById('btnEnhancePrompt')?.addEventListener('click', () => this.enhancePrompt());
 
-    // Submit button
-    document.getElementById('btnGenerateAi')?.addEventListener('click', () => this.generate());
+    // Submit button: Generate single or 4 variants
+    document.getElementById('btnGenerateAi')?.addEventListener('click', () => this.generate4Variants());
+    document.getElementById('btnGenerate4Variants')?.addEventListener('click', () => this.generate4Variants());
 
     // Send to Crop & Rotate
     document.getElementById('btnAiSendToCrop')?.addEventListener('click', () => {
       if (!this.currentResultDataUrl) return;
       window.app.switchTab('crop');
       window.cropEditor.loadImageFromUrl(this.currentResultDataUrl);
-      window.app.showToast('Đã chuyển ảnh sang Studio Cắt & Xoay!', 'success');
+      window.app.showToast('Đã đưa ảnh vào khung chỉnh sửa (Cắt, Xoay, Đổi kích thước)!', 'success');
     });
 
     // Download AI Image
     document.getElementById('btnAiDownload')?.addEventListener('click', () => {
       if (!this.currentResultDataUrl) return;
-      const link = document.createElement('a');
-      link.download = `ai_creation_${Date.now()}.png`;
-      link.href = this.currentResultDataUrl;
-      link.click();
-      window.app.showToast('Đã tải ảnh AI về máy!', 'success');
+      this.downloadDataUrl(this.currentResultDataUrl, `ai_creation_${Date.now()}.png`);
     });
 
     // Random seed button
@@ -108,10 +104,10 @@ class AiEditor {
 
   setupSamplePrompts() {
     const samples = [
-      'Chân dung cô gái cyberpunk ban đêm dưới mưa, ánh đèn neon tím xanh phản chiếu',
-      'Chú mèo phi hành gia trôi nổi trong dải ngân hà lấp lánh sao, phong cách 3D hoạt hình',
-      'Lâu đài kỳ bí trên đỉnh núi mây mù, ánh sáng hoàng hôn vàng rực rỡ, tranh sơn dầu',
-      'Xe thể thao cổ điển thập niên 80 chạy trên cung đường biển, phong cách phim vintage'
+      'thêm con gián lên mặt, highly aesthetic, dynamic composition, vibrant sharp focus',
+      'thêm kính râm cyberpunk phát sáng neon dưới mưa ban đêm',
+      'biến thành phong cách anime Studio Ghibli, màu sắc rực rỡ',
+      'đổi phông nền thành bãi biển hoàng hôn nhiệt đới lấp lánh'
     ];
 
     const container = document.getElementById('aiSamplePrompts');
@@ -150,13 +146,14 @@ class AiEditor {
     }
     const generateBtnText = document.getElementById('aiGenerateBtnText');
     if (generateBtnText) {
-      generateBtnText.textContent = this.mode === 'img2img' ? 'Chỉnh sửa ảnh với AI' : 'Tạo ảnh mới với AI';
+      generateBtnText.textContent = this.mode === 'img2img' ? 'Sinh 4 biến thể AI (A1, A2, A3, A4)' : 'Tạo 4 biến thể AI mới (A1, A2, A3, A4)';
     }
   }
 
   enhancePromptLocally(rawPrompt, style = 'none') {
     let p = (rawPrompt || '').trim();
     const dict = [
+      { vn: /con gián/gi, en: 'realistic cockroach' },
       { vn: /cô gái/gi, en: 'beautiful young girl' },
       { vn: /chàng trai/gi, en: 'handsome man' },
       { vn: /mèo con/gi, en: 'cute kitten' },
@@ -225,11 +222,12 @@ class AiEditor {
       case '4:3':  return { width: 800, height: 600 };
       case '3:2':  return { width: 900, height: 600 };
       case '1:1':
-      default:     return { width: 768, height: 768 };
+      default:     return { width: 512, height: 512 };
     }
   }
 
-  async generate() {
+  // Generate 4 distinct variants (A1, A2, A3, A4)
+  async generate4Variants() {
     const textarea = document.getElementById('aiPromptInput');
     const prompt = textarea ? textarea.value.trim() : '';
 
@@ -240,101 +238,176 @@ class AiEditor {
 
     const modelSelect = document.getElementById('aiModelSelect');
     const model = modelSelect ? modelSelect.value : 'flux';
-    const seedInput = document.getElementById('aiSeedInput');
-    const seed = seedInput && seedInput.value ? parseInt(seedInput.value, 10) : Math.floor(Math.random() * 1000000);
+    const baseSeed = Math.floor(Math.random() * 100000);
 
     const { width, height } = this.getDimensionsForRatio();
 
     const generateBtn = document.getElementById('btnGenerateAi');
     const spinner = document.getElementById('aiSpinner');
     const btnText = document.getElementById('aiGenerateBtnText');
-    const placeholder = document.getElementById('aiEmptyPreview');
-    const previewImg = document.getElementById('aiMainPreviewImg');
-    const previewContainer = document.getElementById('aiPreviewContainer');
-    const actionToolbar = document.getElementById('aiActionToolbar');
 
-    // Show loading state
     if (generateBtn) generateBtn.disabled = true;
     if (spinner) spinner.style.display = 'inline-block';
-    if (btnText) btnText.textContent = 'Đang xử lý hình ảnh với AI...';
+    if (btnText) btnText.textContent = 'Đang sinh 4 biến thể AI (A1, A2, A3, A4)...';
 
-    window.app.showToast('Đang kết nối AI và tạo hình ảnh chất lượng cao...', 'info');
+    window.app.showToast('Đang kết nối AI và tạo 4 biến thể (A1, A2, A3, A4)...', 'info');
+
+    const seeds = [baseSeed, baseSeed + 137, baseSeed + 589, baseSeed + 993];
+    const variantIds = ['A1', 'A2', 'A3', 'A4'];
+    this.variants = [];
+
+    // Container for variants
+    const variantsSection = document.getElementById('variantsSection');
+    const variantsGrid = document.getElementById('variantsGrid');
+    if (variantsSection) variantsSection.style.display = 'block';
+    if (variantsGrid) variantsGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: #60a5fa;"><span class="spinner"></span> Đang tạo 4 biến thể song song...</div>';
 
     try {
-      let dataUrl = null;
+      const isStaticHosting = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('github.io');
 
-      // 1. First try calling Express backend if available
-      try {
-        let endpoint = '/api/ai/generate';
-        let payload = {
-          prompt,
-          style: this.selectedStyle,
-          width,
-          height,
-          model,
-          seed
-        };
+      // Fetch 4 variants
+      for (let i = 0; i < 4; i++) {
+        const vId = variantIds[i];
+        const s = seeds[i];
+        let vUrl = null;
 
-        if (this.mode === 'img2img' && this.sourceImageDataUrl) {
-          endpoint = '/api/ai/edit';
-          payload.image = this.sourceImageDataUrl;
-        }
+        // Try local backend first only if running local Express server
+        if (!isStaticHosting) {
+          try {
+            const res = await fetch('/api/ai/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt,
+                style: this.selectedStyle,
+                width,
+                height,
+                model: 'turbo',
+                seed: s
+              })
+            });
 
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.success) {
-            dataUrl = data.dataUrl;
+            const ct = res.headers.get('content-type') || '';
+            if (res.ok && ct.includes('application/json')) {
+              const data = await res.json();
+              if (data && data.success) vUrl = data.dataUrl;
+            }
+          } catch (beErr) {
+            console.warn(`Variant ${vId} local API failed:`, beErr.message);
           }
         }
-      } catch (backendErr) {
-        console.warn('Backend API unavailable, using direct client-side Pollinations AI:', backendErr.message);
+
+        // Direct Pollinations AI fallback (Vercel & GitHub Pages safe)
+        if (!vUrl) {
+          const enhanced = this.enhancePromptLocally(prompt, this.selectedStyle);
+          const encoded = encodeURIComponent(enhanced);
+          const directUrl = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${s}&nologo=true`;
+
+          try {
+            const imgRes = await fetch(directUrl);
+            if (imgRes.ok) {
+              const blob = await imgRes.blob();
+              vUrl = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+              });
+            } else {
+              // If rate limited, use direct url as preview
+              vUrl = directUrl;
+            }
+          } catch (e) {
+            vUrl = directUrl;
+          }
+        }
+
+        this.variants.push({ id: vId, url: vUrl, seed: s, prompt });
       }
 
-      // 2. Direct client-side Pollinations AI fallback (works on GitHub Pages static!)
-      if (!dataUrl) {
-        const enhanced = this.enhancePromptLocally(prompt, this.selectedStyle);
-        const encoded = encodeURIComponent(enhanced);
-        const directUrl = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true`;
+      // Render 4 variant cards
+      this.renderVariantsGrid();
 
-        const imgResp = await fetch(directUrl);
-        if (!imgResp.ok) throw new Error('Không thể tạo ảnh từ máy chủ AI.');
-        const blob = await imgResp.blob();
-        dataUrl = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
+      // Also set the first variant as main preview
+      if (this.variants.length > 0 && this.variants[0].url) {
+        this.currentResultDataUrl = this.variants[0].url;
+        const mainImg = document.getElementById('aiMainPreviewImg');
+        const emptyPrev = document.getElementById('aiEmptyPreview');
+        const prevContainer = document.getElementById('aiPreviewContainer');
+        const toolbar = document.getElementById('aiActionToolbar');
+
+        if (emptyPrev) emptyPrev.style.display = 'none';
+        if (mainImg) mainImg.src = this.variants[0].url;
+        if (prevContainer) prevContainer.style.display = 'flex';
+        if (toolbar) toolbar.style.display = 'flex';
+
+        this.addToHistory(this.variants[0].url, `${prompt} (A1)`);
       }
 
-      this.currentResultDataUrl = dataUrl;
-
-      // Update preview UI
-      if (placeholder) placeholder.style.display = 'none';
-      if (previewImg) {
-        previewImg.src = dataUrl;
-        previewImg.style.display = 'block';
-      }
-      if (previewContainer) previewContainer.style.display = 'flex';
-      if (actionToolbar) actionToolbar.style.display = 'flex';
-
-      // Record to history strip
-      this.addToHistory(dataUrl, prompt);
-
-      window.app.showToast('Tạo ảnh AI thành công!', 'success');
+      window.app.showToast('Đã tạo xong 4 biến thể (A1, A2, A3, A4)! Chọn ảnh để chỉnh tiếp.', 'success');
     } catch (err) {
-      console.error('AI Generation Error:', err);
+      console.error('Generation error:', err);
       window.app.showToast(`Lỗi: ${err.message}`, 'error');
     } finally {
       if (generateBtn) generateBtn.disabled = false;
       if (spinner) spinner.style.display = 'none';
-      if (btnText) btnText.textContent = this.mode === 'img2img' ? 'Chỉnh sửa ảnh với AI' : 'Tạo ảnh mới với AI';
+      if (btnText) btnText.textContent = this.mode === 'img2img' ? 'Sinh 4 biến thể AI (A1, A2, A3, A4)' : 'Tạo 4 biến thể AI mới (A1, A2, A3, A4)';
     }
+  }
+
+  renderVariantsGrid() {
+    const grid = document.getElementById('variantsGrid');
+    if (!grid) return;
+
+    grid.innerHTML = '';
+    this.variants.forEach((v) => {
+      const card = document.createElement('div');
+      card.className = 'variant-card';
+      card.innerHTML = `
+        <div class="variant-badge">Biến thể ${v.id}</div>
+        <div class="variant-thumb-wrap">
+          <img class="variant-thumb" src="${v.url}" alt="Biến thể ${v.id}" />
+        </div>
+        <div class="variant-card-footer">
+          <button class="btn btn-primary btn-sm btn-select-variant" style="font-weight: 600;">
+            🎯 Chọn ${v.id} chỉnh tiếp (Lặp vòng)
+          </button>
+          <button class="btn btn-secondary btn-sm btn-download-variant">
+            ⬇️ Tải ảnh ${v.id} về máy
+          </button>
+        </div>
+      `;
+
+      // 1-Click Handover: Set this variant as active canvas image for next loop!
+      card.querySelector('.btn-select-variant').addEventListener('click', () => {
+        this.selectVariantAsNextBase(v);
+      });
+
+      // Download this variant
+      card.querySelector('.btn-download-variant').addEventListener('click', () => {
+        this.downloadDataUrl(v.url, `omnipixel_variant_${v.id}_${Date.now()}.png`);
+      });
+
+      grid.appendChild(card);
+    });
+  }
+
+  // Iterative Loop: Select A1, A2, A3, or A4 to continue editing seamlessly!
+  selectVariantAsNextBase(variant) {
+    document.querySelectorAll('.variant-card').forEach((c) => c.classList.remove('selected-base'));
+    // Mark card as selected
+    window.app.switchTab('crop');
+    window.cropEditor.loadImageFromUrl(variant.url);
+    this.sourceImageDataUrl = variant.url;
+
+    window.app.showToast(`Đã chọn biến thể ${variant.id} làm ảnh nền A! Bạn có thể Cắt, Xoay, Đổi độ phân giải (1000x1500) và tiếp tục Prompt AI.`, 'success');
+  }
+
+  downloadDataUrl(url, filename) {
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = url;
+    link.click();
+    window.app.showToast('Đang tải ảnh về máy...', 'success');
   }
 
   addToHistory(url, prompt) {
